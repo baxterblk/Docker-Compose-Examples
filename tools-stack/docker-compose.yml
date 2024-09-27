@@ -1,0 +1,163 @@
+x-common-vars: &common-vars
+  PUID: ${PUID}
+  PGID: ${PGID}
+  TZ: ${TZ}
+  UMASK: ${UMASK}
+
+x-common-opts: &common-opts
+  restart: always
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  whoogle-search:
+    <<: *common-opts  
+    image: ${WHOOGLE_IMAGE:-benbusby/whoogle-search}
+    hostname: search
+    container_name: whoogle-search
+    pids_limit: 50
+    mem_limit: 256mb
+    memswap_limit: 256mb
+    user: whoogle
+    security_opt:
+      - no-new-privileges
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /config:size=10M,uid=927,gid=927,mode=1700
+      - /var/lib/tor:size=15M,uid=927,gid=927,mode=1700
+      - /run/tor:size=1M,uid=927,gid=927,mode=1700
+    ports:
+      - ${WHOOGLE_PORT}:5000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  dozzle:
+    container_name: dozzle
+    hostname: logs
+    image: amir20/dozzle:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - ${DOZZLE_PORT}:8080
+
+  vaultwarden:
+    <<: *common-opts
+    image: vaultwarden/server:latest
+    hostname: vaultwarden
+    container_name: vaultwarden
+    volumes:
+      - ${VAULTWARDEN_DATA_PATH}:/data
+    ports:
+      - ${VAULTWARDEN_PORT}:80
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  privatebin:
+    <<: *common-opts
+    image: privatebin/nginx-fpm-alpine
+    container_name: private-bin
+    read_only: true
+    environment:
+      <<: *common-vars
+    ports:
+      - ${PRIVATEBIN_PORT}:8080
+    volumes:
+      - ${PRIVATEBIN_DATA_PATH}:/srv/data
+
+  portainer-ce:
+    <<: *common-opts
+    container_name: portainer
+    image: portainer/portainer-ce:2.21.0
+    ports:
+      - ${PORTAINER_PORT}:8000
+      - ${PORTAINER_HTTPS_PORT}:9443
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
+  organizr:
+    <<: *common-opts
+    container_name: organizr
+    hostname: organizr
+    image: ghcr.io/organizr/organizr
+    ports:
+      - ${ORGANIZR_PORT}:80
+    volumes:
+      - ${ORGANIZR_CONFIG_PATH}:/config
+    environment:
+      <<: *common-vars
+      DB_TYPE: mysqli
+      DB_HOST: mariadb
+      DB_USER: ${MARIADB_USER}
+      DB_PASS: ${MARIADB_PASSWORD}
+      DB_NAME: ${MARIADB_DATABASE}
+    depends_on:
+      - mariadb
+
+  mariadb:
+    <<: *common-opts
+    container_name: mariadb
+    hostname: mariadb
+    image: mariadb:latest
+    ports:
+      - ${MARIADB_PORT}:3306
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${MARIADB_DATA_PATH}:/var/lib/mysql
+    environment:
+      <<: *common-vars
+      MARIADB_DATABASE: ${MARIADB_DATABASE}
+      MARIADB_USER: ${MARIADB_USER}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+
+  filebrowser:
+    <<: *common-opts
+    container_name: filebrowser
+    image: filebrowser/filebrowser
+    hostname: files
+    ports:
+      - ${FILEBROWSER_PORT}:80
+    volumes:
+      - ${LIDARR_MOUNT_PATH}:/srv/Docker/arr
+      - ${LOCAL_MOUNT_PATH}:/srv/Docker/local
+      - ${NGINX_MOUNT_PATH}:/srv/Docker/nginx
+      - ${MEDIA_MOUNT_PATH}:/srv/Media
+      - ${BACKUP_MOUNT_PATH}:/srv/Backups
+      - ${FILEBROWSER_DATABASE_PATH}:/filebrowser.db
+      - ${FILEBROWSER_CONFIG_PATH}:/filebrowser.json
+    environment:
+      <<: *common-vars
+
+  watchtower:
+    <<: *common-opts
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_CLEANUP: ${WATCHTOWER_CLEANUP}
+      WATCHTOWER_INCLUDE_RESTARTING: ${WATCHTOWER_INCLUDE_RESTARTING}
+      WATCHTOWER_MONITOR_ONLY: ${WATCHTOWER_MONITOR_ONLY}
+      WATCHTOWER_POLL_INTERVAL: ${WATCHTOWER_POLL_INTERVAL}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/ || exit 1"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+      
+volumes:
+  portainer_data:
+    external: true
+    name: portainer_data
